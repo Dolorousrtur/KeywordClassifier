@@ -1,6 +1,7 @@
 import numpy as np
 from nltk import sent_tokenize, word_tokenize, RegexpTokenizer, WordNetLemmatizer, PerceptronTagger
 from nltk.corpus import wordnet
+from nltk.stem import PorterStemmer
 
 from utils_common import contains
 
@@ -129,24 +130,34 @@ def get_wordnet_pos(treebank_tag):
         return wordnet.NOUN
 
 
-def text2sents(text):
+def text2sents(text, lemmatize=False, stemmer=None):
     """
-
-    :param text:
-    :return:
+    converts a text into a list of sentences consisting of normalized words
+    :param text: string to process
+    :param lemmatize if true, words will be lemmatized, otherwise -- stemmed
+    :return: list of lists of words
     """
     sents = sent_tokenize(text)
 
     tokenizer = RegexpTokenizer(r'\w+')
-    lemmatizer = WordNetLemmatizer()
+
+    if lemmatize:
+        normalizer = WordNetLemmatizer()
+        tagger = PerceptronTagger()
+    elif stemmer is None:
+        normalizer = PorterStemmer()
+    else:
+        normalizer = stemmer
 
     sents_normalized = []
 
-    tagger = PerceptronTagger()
-
     for sent in sents:
         sent_tokenized = tokenizer.tokenize(sent)
-        sent_tagged = tagger.tag(sent_tokenized)
-        sent_normalized = [lemmatizer.lemmatize(w[0], pt_convert(w[1])) for w in sent_tagged]
+        if lemmatize:
+            sent_tagged = tagger.tag(sent_tokenized)
+            sent_normalized = [normalizer.lemmatize(w[0], get_wordnet_pos(w[1])) for w in sent_tagged]
+        else:
+            sent_normalized = [normalizer.stem(w) for w in sent_tokenized]
+
         sents_normalized.append(sent_normalized)
     return sents_normalized

@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# markcp which_files_to_copy_directory from_directory to_directory
+files=$(ls $1)
+
+if [ ! -d "$3" ]; then
+  mkdir $3
+fi
+
+for i in $files; do 
+cp $2/$i $3; 
+done
