@@ -1,136 +1,99 @@
-import os, re
 import glob
+import re
+
+from os import path
+
 import numpy as np
-from gensim.models import Word2Vec
-from nltk import sent_tokenize, word_tokenize
 
-def getTitleAbstractBody(filename):
+from utils_common import dictlist_append, raw_filename
+from utils_text import get_window, numWords
+
+
+
+"""
+We use subsequent format of data:
+each article is presented by two files: xxx.txt and xxx.key where xxx is some filename.
+The former file has in it an article divided into parts like this:
+--T
+title
+--A
+abstract
+--B
+body
+--R
+references
+
+The latter contains marked keywords. The default marking is following:
+-T
+task keywords
+-M
+method keywords
+-O
+other keywords
+"""
+def get_text(filename):
     """
-    retrieve text of title, abstract and body of a given article
+    retrieve text of a given article
     :param filename: article filename
-    :return: three strings in lower case: title, abstract, body
+    :return: a map between marks and parts of an article: {'Mark1':'text of a part1', 'Mark2':'text of a part2'}
     """
+
     with open(filename, 'r') as f:
-        lines = f.readlines()
-        title = ""
-        abstract = ""
-        body = ""
-        i = 0
-        while lines[i] != "--T\n":
-            i += 1
-        i += 1
-        while lines[i] != "--A\n":
-            title += lines[i]
-            i += 1
-        i += 1
-        while lines[i] != "--B\n":
-            abstract += lines[i]
-            i += 1
-        i += 1
-        while lines[i] != "--R\n":
-            body += lines[i]
-            i += 1
-        return title.replace('\n', ' ').lower(), abstract.replace('\n', ' ').lower(), body.replace('\n', ' ').lower()
+        lines = map(lambda x: x.rstrip(), f.readlines())
+        it = iter(lines)
+        n = next(it, None)
 
-def contains(list, sublist):
-    if sublist[0] not in list:
-        return False
-    else:
-        indices = [i for i, x in enumerate(list) if x == sublist[0]]
-        for ind in indices:
-            occ = True
-            for i in range(len(sublist) - 1):
-                if list[ind+1+i] != sublist[i+1]:
-                    occ = False
-                    break
-            if occ:
-                return (ind, ind+len(sublist))
-    return False
+        mp = {}
 
-def getWindow(text, keyword, fr, to):
-    sents = sent_tokenize(text)
-    sents_tok = map(lambda x: filter(lambda y: any(c.isalpha() for c in y), word_tokenize(x)), sents)
+        while n is not None:
+            while n is not None and n.startswith('--'):
+                chlab = n[2:]
+                if chlab not in mp:
+                    mp[chlab] = ''
+                currLabel = chlab
+                n = next(it, None)
 
-    window = []
-    kw_splitted = keyword.split()
+            while n is not None and not n.startswith('--'):
+                if n != '':
+                    mp[currLabel]+=n
+                n = next(it, None)
+    return mp
 
-    for sent in sents_tok:
-        bounds = contains(sent, kw_splitted)
-        if bounds:
-            window_st = max(0, bounds[0]+fr)
-            window_end = min(len(sent), bounds[1]+to)
-            for i in range(window_st, window_end):
-                if i not in range(bounds[0], bounds[1]):
-                    window.append(sent[i])
-    return window
-
-def kwrecDistance(words, target,model):
-    size = len(words)
-    similarities = []
-    for w in words:
-        if w in model:
-            similarities.append(model.similarity(w, target))
-        else:
-            similarities.append(0)
-    if size == 1:
-        return similarities
-    else:
-        for i in range(size-1):
-            combined = '_'.join(words[i:i+2])
-            if combined in model:
-                words[i:i+2] = (combined,)
-                return kwrecDistance(words, target, model)
-    return similarities
-
-def keywordDistance(keyword, target, model):
-    keyword_parts = keyword.split()
-    sim = np.array(kwrecDistance(keyword_parts, target, model)).mean()
-    return sim
 
 def text_features(filename, keyword):
     """
-    counts keyword's occurences in title, abstract, title and body
+    build features considering a pair keyword-article
     :param filename: article filename
-    :param keyword:
-    :return: three integers: number of occurences in title, abstract and body
+    :param keyword: keyword
+    :return: tuple of numerical features
     """
-    title, abstract, body = getTitleAbstractBody(filename)
-    tcont = title.count(keyword)
-    acont = abstract.count(keyword)
-    bcont = body.count(keyword)
+    text = get_text(filename)
+
+    tcont = text['T'].count(keyword) > 0
+    acont = text['A'].count(keyword) > 0
+    bcont = text['B'].count(keyword) > 0
+    rcont = text['R'].count(keyword) > 0
+    trcont = text['TR'].count(keyword) > 0
+
     if bcont > 0:
-        pos = body.index(keyword)
-        firstoc = float(len(re.findall('\ +', body[:pos])))/len(re.findall('\ +', body))
+        pos = text['B'].index(keyword)
+        firstoc = float(len(re.findall('\ +', text['B'][:pos])))/len(re.findall('\ +', text['B']))
     else:
         firstoc = -1
-    return tcont, acont, firstoc
+    return tcont, acont, bcont, rcont, trcont, firstoc
 
 
-def dictListAppend(dict, key, val):
-    """
-    appends element to a list-value in a dictionary (adds the list and its key to the dictionary in case it was not there)
-    :param dict: dictionary
-    :param key: key in the dictionary
-    :param val: value to append
-    """
-    if key not in dict:
-        dict[key] = []
-    dict[key].append(val)
-
-def numWords(keyword):
-    return len(keyword.split())
-
-def getKeywords(filename, labels=None):
+def get_keywords(filename, labelmap):
     """
     generates labelled dictionary of keywords placed by label
-    :param filename: file with keywords
-    :param labels: map from string-labels into int-labels
-    :return: dictionary as {0: [kw0, kw1], 1: [], 2:[], 3:[]}
+    :param filename: marked .key file
+    :param labelmap: map from string-labels into int-labels
+    :return: dictionary as {0: [kw0, kw1], 1: [], 2:[]}
     """
     keywords = {}
 
-    if labels is None:
-        labels = {}
+    if labelmap is None:
+        labelmap = {}
 
     with open(filename, 'r') as f:
         lines = map(lambda x: x.rstrip(), f.readlines())
@@ -142,50 +105,113 @@ def getKeywords(filename, labels=None):
         while n is not None:
             while n is not None and n.startswith('-'):
                 chlab = n[1:]
-                if chlab not in labels:
-                    labels[chlab] = maxLabel
+                if chlab not in labelmap:
+                    labelmap[chlab] = maxLabel
                     maxLabel += 1
-                currLabel = labels[chlab]
+                currLabel = labelmap[chlab]
                 n = next(it, None)
 
             while n is not None and not n.startswith('-'):
                 if n != '':
-                    dictListAppend(keywords, currLabel, n)
+                    dictlist_append(keywords, currLabel, n)
                 n = next(it, None)
 
     return keywords
 
-
-def rawFilename(filename):
+def keyword_features(kw):
     """
-    returns filename without extentions
+    builds features considering only a keyword
+    :param kw: keyword
+    :return: tuple of numerical features
     """
-    return os.path.splitext(filename)[0]
+    if kw.endswith('s'):
+        kw = kw[:-1]
 
+    num = numWords(kw)
+    tyend = False
+    words = kw.split()
+    for word in words:
+        if word.endswith('ty'):
+            tyend = True
 
-def buildData(directory):
+    hasalg = 'algorithm' in kw
+
+    return num, tyend, hasalg
+
+def get_data_byfile(filename, labelmap, wind_st=-5, wind_end=5):
+    """
+    build features and word windows for one article
+    :param filename: name of the keywords and article file
+    :param labelmap:
+    :return:
+    """
     data = []
-    labels = {'T': 0, 'M': 1, 'A': 2, 'O': 3}
     kwlist = []
-    s = '{}/*.key'.format(directory)
-    filenames = glob.glob(s)
+    windows = []
+
+    keyfile = '{}.key'.format(filename)
+    txtfile = '{}.txt'.format(filename)
+
+    kws = get_kwlist_byfile(keyfile, labelmap)
+    tab = get_text(txtfile)
+
+    text = '. '.join([tab['A'], tab['B']])
+
+    is_part = [0]*len(kws)
+
+    for i in range(len(kws)):
+        for j in range(i+1, len(kws)):
+            if kws[i][1] in kws[j][1] or kws[j][1] in kws[i][1]:
+                is_part[i] = 1
+                is_part[j] = 1
+
+
+    for i in range(len(kws)):
+        kw_row = kws[i]
+        rawFname = kw_row[0]
+        kw = kw_row[1]
+        label = kw_row[2]
+        kwlist.append((rawFname, kw))
+        row = (text_features(txtfile, kw) + keyword_features(kw) + (is_part[i], label))
+        data.append(row)
+
+        window = get_window(text, kw, wind_st, wind_end, outtype='text')
+
+        windows.append(window)
+
+    return data, kwlist, windows
+
+
+def get_kwlist_byfile(filename, labelmap):
+    data = []
+    keywords_mapped = get_keywords(filename, labelmap)
+    for label in keywords_mapped:
+        for kw in keywords_mapped[label]:
+            data.append((raw_filename(filename)[1], kw, label))
+    return data
+
+
+def build_data(directory, labelmap=None):
+    if labelmap is None:
+        labelmap = {'T': 0, 'M': 1, 'O': 2}
+
+    data = []
+    kwlist = []
+
+    windows = []
+    windows_aft = []
+
+    dir_re = path.join('{}','*.key').format(directory)
+    filenames = glob.glob(dir_re)
     for filename in filenames:
-        kwords = getKeywords(filename, labels)
+        directory, file = raw_filename(filename)
+        filename = path.join(directory, file)
+        file_data, file_kws, window = get_data_byfile(filename, labelmap)
+        data += file_data
+        kwlist += file_kws
 
-        rawFname = rawFilename(filename)
-        for label in kwords:
-            for kw in kwords[label]:
-                row = np.array(text_features(rawFname + '.txt', kw) + (numWords(kw), ) + (label,))
-                data.append(row)
-                kwlist.append(kw)
-    return np.array(data), kwlist
+        windows += window
 
-def countWords(kwlist):
-    wordDict = {}
-    for kw in kwlist:
-        words = kw.lower().split()
-        for w in words:
-            if w not in wordDict:
-                wordDict[w] = 1
-            else: wordDict[w] += 1
-    return wordDict
+
+    return np.array(data), kwlist, windows
+
