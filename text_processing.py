@@ -6,9 +6,44 @@ from nltk.stem import PorterStemmer
 from utils_common import contains
 
 
+def text2sents(text, lemmatize=False, stemmer=None):
+    """
+    converts a text into a list of sentences consisted of normalized words
+    :param text: list of string to process
+    :param lemmatize: if true, words will be lemmatized, otherwise -- stemmed
+    :param stemmer: stemmer to be used, if None, PortedStemmer is used. Only applyed if lemmatize==False
+    :return: list of lists of words
+    """
+    sents = sent_tokenize(text)
+
+    tokenizer = RegexpTokenizer(r'\w+')
+
+    if lemmatize:
+        normalizer = WordNetLemmatizer()
+        tagger = PerceptronTagger()
+    elif stemmer is None:
+        normalizer = PorterStemmer()
+    else:
+        normalizer = stemmer
+
+    sents_normalized = []
+
+    for sent in sents:
+        sent_tokenized = tokenizer.tokenize(sent)
+        if lemmatize:
+            sent_tagged = tagger.tag(sent_tokenized)
+            sent_normalized = [normalizer.lemmatize(w[0], get_wordnet_pos(w[1])) for w in sent_tagged]
+        else:
+            sent_normalized = [normalizer.stem(w) for w in sent_tokenized]
+
+        sents_normalized.append(sent_normalized)
+    return sents_normalized
+
+
 def get_window(text, phrase, fr, to, outtype="list"):
     """
-    returns a window of words from text by which a given phrase is surrounded
+    returns a window of words by which a given phrase is surrounded in the text
+    It is supposed that a phrase can occure no more that once in a sentence
     :param text: text string
     :param phrase: a string os words splitted by spaces
     :param fr: relative to the phrase position of windows' start (if -5, the window will contain 5 words before the phrase)
@@ -51,13 +86,13 @@ def get_window(text, phrase, fr, to, outtype="list"):
         return ' '.join(window)
 
 
-def kw_vec_distance(words, target, model):
+def phvec_distance(words, target, model):
     """
-    a word2vec distances between parts of a keyword (representes as a list of words) and a word in a given model
+    a word2vec distances between parts of a phrase (represented as a list of words) and a word in a given model
     distance(words, target)
-    :param words: words comprising the keyword
+    :param words: list of words comprising the keyword
     :param target: target word
-    :param model:
+    :param model: word2vec model
     :return: list of distances from parts of a keyword to the target.
     If the whole keyword occured in model, its length == 1
     """
@@ -75,45 +110,45 @@ def kw_vec_distance(words, target, model):
             combined = '_'.join(words[i:i+2])
             if combined in model:
                 words[i:i+2] = (combined,)
-                return kw_vec_distance(words, target, model)
+                return phvec_distance(words, target, model)
     return similarities
 
 
-def keyword_distance(keyword, target, model):
+def phrase2word_distance(phrase, target, model):
     """
     word2vec distance between a keyword and another word
     distances from parts of a keyword are used if the whoke word didn't occured
-    :param keyword: str
+    :param phrase: str
     :param target: str
     :param model: gensim.model.Word2Vec
     :return: distance (float)
     """
-    keyword_parts = keyword.split()
-    sim = np.array(kw_vec_distance(keyword_parts, target, model)).mean()
+    keyword_parts = phrase.split()
+    sim = np.array(phvec_distance(keyword_parts, target, model)).mean()
     return sim
 
 
-def numWords(phrase):
+def wordcount(phrase):
     """
     number of words in a phrase
     """
     return len(phrase.split())
 
 
-def count_words(phrases):
+def occurences_map(phrases):
     """
     counts occurences of each word in a list of phrases
     :param phrases: list of strings
     :return: dictionary {word : n_occurences}
     """
-    wordDict = {}
+    word_dict = {}
     for ph in phrases:
         words = ph.lower().split()
         for w in words:
-            if w not in wordDict:
-                wordDict[w] = 1
-            else: wordDict[w] += 1
-    return wordDict
+            if w not in word_dict:
+                word_dict[w] = 1
+            else: word_dict[w] += 1
+    return word_dict
 
 
 def get_wordnet_pos(treebank_tag):
@@ -130,34 +165,4 @@ def get_wordnet_pos(treebank_tag):
         return wordnet.NOUN
 
 
-def text2sents(text, lemmatize=False, stemmer=None):
-    """
-    converts a text into a list of sentences consisting of normalized words
-    :param text: string to process
-    :param lemmatize if true, words will be lemmatized, otherwise -- stemmed
-    :return: list of lists of words
-    """
-    sents = sent_tokenize(text)
 
-    tokenizer = RegexpTokenizer(r'\w+')
-
-    if lemmatize:
-        normalizer = WordNetLemmatizer()
-        tagger = PerceptronTagger()
-    elif stemmer is None:
-        normalizer = PorterStemmer()
-    else:
-        normalizer = stemmer
-
-    sents_normalized = []
-
-    for sent in sents:
-        sent_tokenized = tokenizer.tokenize(sent)
-        if lemmatize:
-            sent_tagged = tagger.tag(sent_tokenized)
-            sent_normalized = [normalizer.lemmatize(w[0], get_wordnet_pos(w[1])) for w in sent_tagged]
-        else:
-            sent_normalized = [normalizer.stem(w) for w in sent_tokenized]
-
-        sents_normalized.append(sent_normalized)
-    return sents_normalized

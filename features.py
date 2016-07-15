@@ -6,7 +6,7 @@ from os import path
 import numpy as np
 
 from utils_common import dictlist_append, raw_filename
-from utils_text import get_window, numWords
+from text_processing import get_window, wordcount
 
 
 
@@ -31,57 +31,94 @@ method keywords
 -O
 other keywords
 """
-def get_text(filename):
+def build_data(directory, labelmap=None, window_st=-5, window_end=5):
     """
-    retrieve text of a given article
-    :param filename: article filename
-    :return: a map between marks and parts of an article: {'Mark1':'text of a part1', 'Mark2':'text of a part2'}
+    Builds features from the whole directory and window for each keyword
+    :param directory: name of the directory
+    :param labelmap: map from string-labels into int-labels
+    :param window_st: relative to the phrase position of windows' start (if -5, the windows will contain 5 words before the phrase)
+    :param window_end: relative to the phrase position of windows' end
+    :return: builded dataset, list of corresponding tuples (raw_filename, keyword) and list of corresponding windows
     """
+    if labelmap is None:
+        labelmap = {'T': 0, 'M': 1, 'O': 2}
 
-    with open(filename, 'r') as f:
-        lines = map(lambda x: x.rstrip(), f.readlines())
-        it = iter(lines)
-        n = next(it, None)
+    data = []
+    kwlist = []
+    windows = []
 
-        mp = {}
+    dir_re = path.join('{}','*.key').format(directory)
+    filenames = glob.glob(dir_re)
+    for filename in filenames:
+        directory, file = raw_filename(filename)
+        filename = path.join(directory, file)
+        file_data, file_kws, window = get_data_byfile(filename, labelmap, wind_st=window_st, wind_end=window_end)
+        data += file_data
+        kwlist += file_kws
 
-        while n is not None:
-            while n is not None and n.startswith('--'):
-                chlab = n[2:]
-                if chlab not in mp:
-                    mp[chlab] = ''
-                currLabel = chlab
-                n = next(it, None)
-
-            while n is not None and not n.startswith('--'):
-                if n != '':
-                    mp[currLabel]+=n
-                n = next(it, None)
-    return mp
+        windows += window
 
 
-def text_features(filename, keyword):
+    return np.array(data), kwlist, windows
+
+def get_data_byfile(filename, labelmap, wind_st=-5, wind_end=5):
     """
-    build features considering a pair keyword-article
-    :param filename: article filename
-    :param keyword: keyword
-    :return: tuple of numerical features
+    build features and word windows for one article
+    :param filename: name of the keywords and article file
+    :param labelmap: map from string-labels into int-labels
+    :param wind_st: relative to the phrase position of windows' start (if -5, the windows will contain 5 words before the phrase)
+    :param wind_end: relative to the phrase position of windows' end
+    :return: builded dataset, list of corresponding tuples (raw_filename, keyword) and list of corresponding windows
     """
-    text = get_text(filename)
+    data = []
+    kwlist = []
+    windows = []
 
-    tcont = text['T'].count(keyword) > 0
-    acont = text['A'].count(keyword) > 0
-    bcont = text['B'].count(keyword) > 0
-    rcont = text['R'].count(keyword) > 0
-    trcont = text['TR'].count(keyword) > 0
+    keyfile = '{}.key'.format(filename)
+    txtfile = '{}.txt'.format(filename)
 
-    if bcont > 0:
-        pos = text['B'].index(keyword)
-        firstoc = float(len(re.findall('\ +', text['B'][:pos])))/len(re.findall('\ +', text['B']))
-    else:
-        firstoc = -1
-    return tcont, acont, bcont, rcont, trcont, firstoc
+    kws = get_kwlist_byfile(keyfile, labelmap)
+    tab = get_text(txtfile)
 
+    text = '. '.join([tab['A'], tab['B']])
+
+    is_part = [0]*len(kws)
+
+    for i in range(len(kws)):
+        for j in range(i+1, len(kws)):
+            if kws[i][1] in kws[j][1] or kws[j][1] in kws[i][1]:
+                is_part[i] = 1
+                is_part[j] = 1
+
+
+    for i in range(len(kws)):
+        kw_row = kws[i]
+        rawFname = kw_row[0]
+        kw = kw_row[1]
+        label = kw_row[2]
+        kwlist.append((rawFname, kw))
+        row = (text_features(txtfile, kw) + keyword_features(kw) + (is_part[i], label))
+        data.append(row)
+
+        window = get_window(text, kw, wind_st, wind_end, outtype='text')
+
+        windows.append(window)
+
+    return data, kwlist, windows
+
+def get_kwlist_byfile(filename, labelmap):
+    """
+    Returns a list of keywords fron one .key file
+    :param filename: name of the file
+    :param labelmap: map from string-labels into int-labels
+    :return: list of tuples (raw_filename, keyword, label)
+    """
+    data = []
+    keywords_mapped = get_keywords(filename, labelmap)
+    for label in keywords_mapped:
+        for kw in keywords_mapped[label]:
+            data.append((raw_filename(filename)[1], kw, label))
+    return data
 
 def get_keywords(filename, labelmap):
     """
@@ -127,7 +164,7 @@ def keyword_features(kw):
     if kw.endswith('s'):
         kw = kw[:-1]
 
-    num = numWords(kw)
+    num = wordcount(kw)
     tyend = False
     words = kw.split()
     for word in words:
@@ -138,80 +175,52 @@ def keyword_features(kw):
 
     return num, tyend, hasalg
 
-def get_data_byfile(filename, labelmap, wind_st=-5, wind_end=5):
+def text_features(filename, keyword):
     """
-    build features and word windows for one article
-    :param filename: name of the keywords and article file
-    :param labelmap:
-    :return:
+    build features considering a pair keyword-article
+    :param filename: article filename
+    :param keyword: keyword
+    :return: tuple of numerical features
     """
-    data = []
-    kwlist = []
-    windows = []
+    text = get_text(filename)
 
-    keyfile = '{}.key'.format(filename)
-    txtfile = '{}.txt'.format(filename)
+    tcont = text['T'].count(keyword) > 0
+    acont = text['A'].count(keyword) > 0
+    bcont = text['B'].count(keyword) > 0
+    rcont = text['R'].count(keyword) > 0
+    trcont = text['TR'].count(keyword) > 0
 
-    kws = get_kwlist_byfile(keyfile, labelmap)
-    tab = get_text(txtfile)
+    if bcont > 0:
+        pos = text['B'].index(keyword)
+        firstoc = float(len(re.findall('\ +', text['B'][:pos])))/len(re.findall('\ +', text['B']))
+    else:
+        firstoc = -1
+    return tcont, acont, bcont, rcont, trcont, firstoc
 
-    text = '. '.join([tab['A'], tab['B']])
+def get_text(filename):
+    """
+    retrieve text of a given article
+    :param filename: article filename
+    :return: a map between marks and parts of an article: {'Mark1':'text of a part1', 'Mark2':'text of a part2'}
+    """
 
-    is_part = [0]*len(kws)
+    with open(filename, 'r') as f:
+        lines = map(lambda x: x.rstrip(), f.readlines())
+        it = iter(lines)
+        n = next(it, None)
 
-    for i in range(len(kws)):
-        for j in range(i+1, len(kws)):
-            if kws[i][1] in kws[j][1] or kws[j][1] in kws[i][1]:
-                is_part[i] = 1
-                is_part[j] = 1
+        mp = {}
 
+        while n is not None:
+            while n is not None and n.startswith('--'):
+                chlab = n[2:]
+                if chlab not in mp:
+                    mp[chlab] = ''
+                currLabel = chlab
+                n = next(it, None)
 
-    for i in range(len(kws)):
-        kw_row = kws[i]
-        rawFname = kw_row[0]
-        kw = kw_row[1]
-        label = kw_row[2]
-        kwlist.append((rawFname, kw))
-        row = (text_features(txtfile, kw) + keyword_features(kw) + (is_part[i], label))
-        data.append(row)
-
-        window = get_window(text, kw, wind_st, wind_end, outtype='text')
-
-        windows.append(window)
-
-    return data, kwlist, windows
-
-
-def get_kwlist_byfile(filename, labelmap):
-    data = []
-    keywords_mapped = get_keywords(filename, labelmap)
-    for label in keywords_mapped:
-        for kw in keywords_mapped[label]:
-            data.append((raw_filename(filename)[1], kw, label))
-    return data
-
-
-def build_data(directory, labelmap=None):
-    if labelmap is None:
-        labelmap = {'T': 0, 'M': 1, 'O': 2}
-
-    data = []
-    kwlist = []
-
-    windows = []
-    windows_aft = []
-
-    dir_re = path.join('{}','*.key').format(directory)
-    filenames = glob.glob(dir_re)
-    for filename in filenames:
-        directory, file = raw_filename(filename)
-        filename = path.join(directory, file)
-        file_data, file_kws, window = get_data_byfile(filename, labelmap)
-        data += file_data
-        kwlist += file_kws
-
-        windows += window
-
-
-    return np.array(data), kwlist, windows
-
+            while n is not None and not n.startswith('--'):
+                if n != '':
+                    mp[currLabel]+=n
+                n = next(it, None)
+    return mp

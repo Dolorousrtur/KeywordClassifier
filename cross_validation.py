@@ -8,7 +8,7 @@ from sklearn.learning_curve import learning_curve
 
 def cm2accuracy(cm):
     """
-    counts accuracy by a confusion matrix
+    Counts accuracy by a confusion matrix
     """
     acc = float(sum(cm[i, i] for i in range(cm.shape[0])))
     return acc / cm.sum()
@@ -16,7 +16,7 @@ def cm2accuracy(cm):
 
 def learning_curves(X, y, clf, params, train_sizes=None, feature_selection=False, n_folds=3, scoring='accuracy'):
     """
-    builds learning curves on test set, with parametesr chosen on train and validation set using nested cross validation
+    Builds learning curves on test set, with parameters chosen on train and validation set using nested cross validation
     :param X: data
     :param y: labels
     :param clf: classificator
@@ -46,7 +46,7 @@ def learning_curves(X, y, clf, params, train_sizes=None, feature_selection=False
             rlr.fit(train_data, train_labels)
 
             inds = [i for i in range(X.shape[1]) if rlr.all_scores_[i] > 0.0]
-            print len(inds)
+            print len(inds), ' features chosen'
             train_data = train_data[:, inds]
 
         gs = GridSearchCV(clf, params, scoring=scoring, cv=5)
@@ -67,7 +67,7 @@ def learning_curves(X, y, clf, params, train_sizes=None, feature_selection=False
 
 def kfoldCM(classifier, data, labels, n_classes=None, n_folds=3):
     """
-    performs cross-validation on a given dataset with a given classifier
+    Performs cross-validation on a given dataset with a given classifier
     :param classifier: classifier
     :param data: dataset
     :param labels: labels for the dataset
