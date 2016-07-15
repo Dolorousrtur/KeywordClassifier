@@ -1,14 +1,13 @@
 import glob
 import re
 
+import os
 from os import path
 
 import numpy as np
 
 from utils_common import dictlist_append, raw_filename
 from text_processing import get_window, wordcount
-
-
 
 """
 We use subsequent format of data:
@@ -31,37 +30,79 @@ method keywords
 -O
 other keywords
 """
-def build_data(directory, labelmap=None, window_st=-5, window_end=5):
-    """
-    Builds features from the whole directory and window for each keyword
-    :param directory: name of the directory
-    :param labelmap: map from string-labels into int-labels
-    :param window_st: relative to the phrase position of windows' start (if -5, the windows will contain 5 words before the phrase)
-    :param window_end: relative to the phrase position of windows' end
-    :return: builded dataset, list of corresponding tuples (raw_filename, keyword) and list of corresponding windows
-    """
-    if labelmap is None:
-        labelmap = {'T': 0, 'M': 1, 'O': 2}
 
-    data = []
-    kwlist = []
-    windows = []
+class KwDataset:
+    def __init__(self, directory, labelmap):
 
-    dir_re = path.join('{}','*.key').format(directory)
-    filenames = glob.glob(dir_re)
-    for filename in filenames:
-        directory, file = raw_filename(filename)
-        filename = path.join(directory, file)
-        file_data, file_kws, window = get_data_byfile(filename, labelmap, wind_st=window_st, wind_end=window_end)
-        data += file_data
-        kwlist += file_kws
+        if directory.endswith(os.sep):
+            directory = directory[:-1]
 
-        windows += window
+        self.directory = directory
+        self.labelmap = labelmap
+        self.build_data()
 
 
-    return np.array(data), kwlist, windows
+    def get_data(self):
+        return self.data[:, :-1]
 
-def get_data_byfile(filename, labelmap, wind_st=-5, wind_end=5):
+    def get_labels(self):
+        return self.data[:, -1]
+
+    def get_keyword_list(self):
+        return self.keywords
+
+    def build_windows(self, window_st=-5, window_end=5, outtype='list'):
+        windows = []
+
+        curr_file = ""
+        text = ""
+
+        if self.directory != "":
+            txtfn = path.join('{}','{}.txt')
+        else:
+            txtfn = '{}{}.txt'
+
+        for kw in self.keywords:
+            filename = kw[0]
+            keyword =  kw[1]
+            if filename != curr_file:
+                tab = get_text(txtfn.format(self.directory, filename))
+                text = ' '.join((tab['A'], tab['B']))
+            window = get_window(text, keyword, window_st, window_end,  outtype=outtype)
+            windows.append(window)
+
+        return windows
+
+
+    def build_data(self):
+        """
+        Builds features from the whole directory and window for each keyword
+        :param directory: name of the directory
+        :param labelmap: map from string-labels into int-labels
+        :param window_st: relative to the phrase position of windows' start (if -5, the windows will contain 5 words before the phrase)
+        :param window_end: relative to the phrase position of windows' end
+        :return: builded dataset, list of corresponding tuples (raw_filename, keyword) and list of corresponding windows
+        """
+        if self.labelmap is None:
+            labelmap = {'T': 0, 'M': 1, 'O': 2}
+
+        data = []
+        kwlist = []
+        windows = []
+
+        dir_re = path.join('{}', '*.key').format(self.directory)
+        filenames = glob.glob(dir_re)
+        for filename in filenames:
+            directory, file = raw_filename(filename)
+            filename = path.join(directory, file)
+            file_data, file_kws = get_data_byfile(filename, self.labelmap)
+            data += file_data
+            kwlist += file_kws
+
+        self.data = np.array(data)
+        self.keywords = kwlist
+
+def get_data_byfile(filename, labelmap):
     """
     build features and word windows for one article
     :param filename: name of the keywords and article file
@@ -72,15 +113,11 @@ def get_data_byfile(filename, labelmap, wind_st=-5, wind_end=5):
     """
     data = []
     kwlist = []
-    windows = []
 
     keyfile = '{}.key'.format(filename)
     txtfile = '{}.txt'.format(filename)
 
     kws = get_kwlist_byfile(keyfile, labelmap)
-    tab = get_text(txtfile)
-
-    text = '. '.join([tab['A'], tab['B']])
 
     is_part = [0]*len(kws)
 
@@ -100,11 +137,8 @@ def get_data_byfile(filename, labelmap, wind_st=-5, wind_end=5):
         row = (text_features(txtfile, kw) + keyword_features(kw) + (is_part[i], label))
         data.append(row)
 
-        window = get_window(text, kw, wind_st, wind_end, outtype='text')
 
-        windows.append(window)
-
-    return data, kwlist, windows
+    return data, kwlist
 
 def get_kwlist_byfile(filename, labelmap):
     """

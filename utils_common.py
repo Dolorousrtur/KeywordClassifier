@@ -20,19 +20,14 @@ def contains(list, sublist):
     :param sublist:
     :return: False if there is no occurece, bounds of the first occurence otherwise
     """
-    if sublist[0] not in list:
-        return False
-    else:
-        indices = [i for i, x in enumerate(list) if x == sublist[0]]
-        for ind in indices:
-            occ = True
+    indices = [i for i, x in enumerate(list) if x == sublist[0]]
 
-            for i in range(1, len(sublist)):
-                if ind+i >= len(list) or list[ind+i] != sublist[i]:
-                    occ = False
-                    break
-            if occ:
-                return (ind, ind+len(sublist))
+    if len(indices) == 0:
+        return False
+
+    for ind in indices:
+        if list[ind+1:ind+len(sublist)] == sublist[1:]:
+            return ind, ind+len(sublist)
     return False
 
 
